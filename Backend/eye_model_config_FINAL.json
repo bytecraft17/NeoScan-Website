@@ -1,0 +1,51 @@
+{
+  "model": "EfficientNetB4",
+  "class_indices": {
+    "cataract": 0,
+    "normal_eye": 1,
+    "stage_0_normal": 2,
+    "stage_1": 3,
+    "stage_2": 4,
+    "stage_3": 5
+  },
+  "idx_to_class": {
+    "0": "cataract",
+    "1": "normal_eye",
+    "2": "stage_0_normal",
+    "3": "stage_1",
+    "4": "stage_2",
+    "5": "stage_3"
+  },
+  "num_classes": 6,
+  "input_size": [
+    380,
+    380,
+    3
+  ],
+  "preprocessing": "efficientnet.preprocess_input + Ben Graham (ROP) + CLAHE",
+  "test_accuracy": 0.9838,
+  "macro_f1": 0.9788,
+  "val_accuracy": 0.9828,
+  "phase1_epochs": 18,
+  "phase2_epochs": 27,
+  "total_epochs": 45,
+  "classes_detail": {
+    "cataract": "Cataract / Leukocoria \u2014 F1: 0.9940",
+    "normal_eye": "Normal healthy eye \u2014 F1: 0.9939",
+    "stage_0_normal": "ROP Stage 0 \u2014 No ROP \u2014 F1: 0.9826",
+    "stage_1": "ROP Stage 1 \u2014 Mild \u2014 F1: 0.9371",
+    "stage_2": "ROP Stage 2 \u2014 Moderate \u2014 F1: 0.9680",
+    "stage_3": "ROP Stage 3 \u2014 Severe \u2014 F1: 0.9970"
+  },
+  "comparison": {
+    "InceptionV3": {
+      "test_acc": 0.9165,
+      "macro_f1": 0.8969
+    },
+    "EfficientNetB4": {
+      "test_acc": 0.9838,
+      "macro_f1": 0.9788
+    },
+    "winner": "EfficientNetB4"
+  }
+}

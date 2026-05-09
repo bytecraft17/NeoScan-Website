@@ -1,0 +1,13 @@
+# Model weights
+*.pth
+*.keras
+*.h5
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Loose files
+pip
+numpy
+[21]
