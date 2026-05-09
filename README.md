@@ -13,7 +13,7 @@ Full-stack web application for NeoScan AI neonatal screening system.
 
 ## Model Weights
 Model weights are NOT included in this repo due to large file size.
-Download from Google Drive: [add your drive link here]
+Download from Google Drive: [(https://drive.google.com/drive/folders/1Sj9OCNijpDyL0qnsxFj2BNnAR8N4KSQ6?usp=sharing)]
 
 ## How to Run Backend
 pip install -r requirements.txt
