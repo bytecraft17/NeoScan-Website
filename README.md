@@ -18,3 +18,7 @@ Download from Google Drive: [(https://drive.google.com/drive/folders/1Sj9OCNijpD
 ## How to Run Backend
 pip install -r requirements.txt
 python main.py
+
+# NeoScan AI — Website 🍼
+🌐 **Live Website:** https://bytecraft17.github.io/NeoScan-Website/Frontend/
+📓 **AI Notebooks:** https://github.com/bytecraft17/Neoscan-AI-
