@@ -4,7 +4,7 @@ python-multipart==0.0.9
 opencv-python-headless
 Pillow
 numpy
-tensorflow==2.15.0
+tensorflow-cpu
 torch
 torchvision
 timm
