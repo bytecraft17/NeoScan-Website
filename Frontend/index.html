@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>NeoScan AI — Neonatal Diagnostic Platform</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Fraunces:ital,wght@0,300;0,600;0,700;1,300;1,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+
 <style>
 /* ═══════════════════════════════════════════════════
    TOKENS
@@ -633,6 +634,88 @@ input[type=range] { width:100%; accent-color:var(--accent); }
   background:rgba(245,166,35,0.12); color:var(--amber);
   font-size:10.5px; font-weight:600; border:1px solid rgba(245,166,35,0.2);
 }
+
+/* ═══ CAMERA MODAL ═══ */
+#camera-modal {
+  display: none;
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.93);
+  align-items: center; justify-content: center;
+  flex-direction: column; gap: 18px;
+}
+.camera-module-label {
+  color: var(--text2); font-size: 12px;
+  letter-spacing: 2px; text-transform: uppercase; font-weight: 600;
+}
+.camera-container {
+  position: relative;
+  border-radius: 16px; overflow: hidden;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 40px var(--accent-glow);
+  max-width: 600px; width: 90vw;
+}
+#camera-video {
+  width: 100%; display: block; background: #000;
+  max-height: 60vh; object-fit: cover;
+}
+#camera-canvas { display: none; }
+#camera-flash {
+  position: absolute; inset: 0;
+  background: white; opacity: 0;
+  transition: opacity 0.08s; pointer-events: none;
+}
+.camera-crosshair-h, .camera-crosshair-v {
+  position: absolute; background: rgba(91,141,238,0.5); pointer-events: none;
+}
+.camera-crosshair-h { top:50%; left:10%; right:10%; height:1px; transform:translateY(-50%); }
+.camera-crosshair-v { left:50%; top:10%; bottom:10%; width:1px; transform:translateX(-50%); }
+.camera-corner {
+  position: absolute; width: 22px; height: 22px; pointer-events: none;
+  border-color: var(--teal); border-style: solid;
+}
+.camera-corner.tl { top:12px; left:12px; border-width:2px 0 0 2px; }
+.camera-corner.tr { top:12px; right:12px; border-width:2px 2px 0 0; }
+.camera-corner.bl { bottom:12px; left:12px; border-width:0 0 2px 2px; }
+.camera-corner.br { bottom:12px; right:12px; border-width:0 2px 2px 0; }
+.camera-btns {
+  display: flex; gap: 18px; align-items: center;
+}
+.btn-capture {
+  width: 66px; height: 66px; border-radius: 50%;
+  background: white; border: 4px solid var(--accent);
+  cursor: pointer; transition: transform 0.15s;
+  box-shadow: 0 0 24px var(--accent-glow), 0 0 0 6px rgba(91,141,238,0.12);
+  flex-shrink: 0;
+}
+.btn-capture:hover { transform: scale(1.08); }
+.btn-capture:active { transform: scale(0.93); }
+.btn-close-cam {
+  background: var(--surface2); border: 1px solid var(--border2);
+  color: var(--text2); padding: 10px 20px;
+  border-radius: 9px; font-size: 13px;
+  cursor: pointer; transition: all 0.18s; font-family: var(--font-sans);
+}
+.btn-close-cam:hover { color: var(--rose); border-color: var(--rose); }
+.camera-hint {
+  color: var(--text3); font-size: 11.5px; text-align: center;
+  max-width: 340px; line-height: 1.6;
+}
+/* Camera button below predict */
+.btn-camera {
+  width: 100%; margin-top: 8px;
+  padding: 11px; border-radius: 11px;
+  background: transparent;
+  border: 1px solid rgba(91,141,238,0.35);
+  color: var(--accent); font-weight: 600; font-size: 13.5px;
+  cursor: pointer; transition: all 0.2s;
+  font-family: var(--font-sans); letter-spacing: 0.2px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-camera:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
 </style>
 </head>
 <body>
@@ -818,6 +901,9 @@ input[type=range] { width:100%; accent-color:var(--accent); }
           <button class="btn-predict" id="eye-predict-btn" onclick="runEyePrediction()" disabled>
             🔍 Analyse Image
           </button>
+          <button class="btn-camera" onclick="openCamera('eye')">
+            📷 Use Camera — Capture Live
+          </button>
         </div>
 
         <!-- RIGHT -->
@@ -903,6 +989,9 @@ input[type=range] { width:100%; accent-color:var(--accent); }
           <button class="btn-predict" id="skin-predict-btn" onclick="runSkinPrediction()" disabled>
             🔍 Analyse Skin
           </button>
+          <button class="btn-camera" onclick="openCamera('skin')">
+            📷 Use Camera — Capture Live
+          </button>
         </div>
 
         <div class="panel">
@@ -964,6 +1053,9 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 
           <button class="btn-predict" id="body-predict-btn" onclick="runBodyPrediction()" disabled>
             🔍 Analyse Body
+          </button>
+          <button class="btn-camera" onclick="openCamera('body')">
+            📷 Use Camera — Capture Live
           </button>
         </div>
 
@@ -1027,6 +1119,9 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 
           <button class="btn-predict" id="face-predict-btn" onclick="runFacePrediction()" disabled>
             🔍 Analyse Face
+          </button>
+          <button class="btn-camera" onclick="openCamera('face')">
+            📷 Use Camera — Capture Live
           </button>
         </div>
 
@@ -1159,9 +1254,145 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 </main>
 </div><!-- /shell -->
 
+<!-- ══════════════════════════════════════════
+     CAMERA MODAL
+══════════════════════════════════════════ -->
+<div id="camera-modal">
+  <div class="camera-module-label" id="camera-module-label">📷 Live Camera</div>
+  <div class="camera-container">
+    <video id="camera-video" autoplay playsinline muted></video>
+    <canvas id="camera-canvas"></canvas>
+    <div id="camera-flash"></div>
+    <!-- Crosshair overlay -->
+    <div class="camera-crosshair-h"></div>
+    <div class="camera-crosshair-v"></div>
+    <!-- Corner brackets -->
+    <div class="camera-corner tl"></div>
+    <div class="camera-corner tr"></div>
+    <div class="camera-corner bl"></div>
+    <div class="camera-corner br"></div>
+  </div>
+  <div class="camera-btns">
+    <button class="btn-close-cam" onclick="closeCamera()">✕ Cancel</button>
+    <button class="btn-capture" onclick="capturePhoto()" title="Capture Photo"></button>
+    <div style="width:68px"></div>
+  </div>
+  <div class="camera-hint">
+    Position the image in frame, then press the white button to capture and auto-analyse
+  </div>
+</div>
+
 <script>
 // ── CONFIG ───────────────────────────────────────────────────
 const API = 'http://localhost:8000';
+// ════════════════════════════════════════════════════
+//  CAMERA MODULE — Real-Time Capture
+// ════════════════════════════════════════════════════
+let activeStream = null;
+let activeCameraModule = null;
+
+function openCamera(module) {
+  activeCameraModule = module;
+  const modal = document.getElementById('camera-modal');
+  const video = document.getElementById('camera-video');
+  const labels = { eye:'👁 Eye Analysis', skin:'🩺 Skin Analysis', body:'👶 Body Analysis', face:'🫥 Face Analysis' };
+  document.getElementById('camera-module-label').textContent = '📷 ' + (labels[module] || 'Camera');
+  modal.style.display = 'flex';
+
+  navigator.mediaDevices.getUserMedia({ 
+    video: { facingMode: 'environment', width:1280, height:720 } 
+  })
+  .then(stream => {
+    activeStream = stream;
+    video.srcObject = stream;
+    video.play();
+  })
+  .catch(err => {
+    alert('Camera not accessible: ' + err.message);
+    closeCamera();
+  });
+}
+
+function closeCamera() {
+  if(activeStream) {
+    activeStream.getTracks().forEach(t => t.stop());
+    activeStream = null;
+  }
+  document.getElementById('camera-modal').style.display = 'none';
+}
+
+function capturePhoto() {
+  const video  = document.getElementById('camera-video');
+  const canvas = document.getElementById('camera-canvas');
+
+  if(!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+    alert('Camera not ready yet — please wait a moment and try again.');
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  // Draw actual video frame (no mirroring — AI needs real orientation)
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // Check canvas is not blank/black
+  const pixel = ctx.getImageData(10, 10, 1, 1).data;
+  const isBlank = pixel[0] === 0 && pixel[1] === 0 && pixel[2] === 0;
+  if(isBlank) {
+    // Frame wasn't ready, retry after next animation frame
+    requestAnimationFrame(() => {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      _doCapture(canvas, activeCameraModule);
+    });
+    return;
+  }
+
+  // Flash effect
+  const flash = document.getElementById('camera-flash');
+  flash.style.opacity = '1';
+  setTimeout(() => flash.style.opacity = '0', 150);
+
+  _doCapture(canvas, activeCameraModule);
+}
+
+function _doCapture(canvas, capturedModule) {
+  canvas.toBlob(blob => {
+    if(!blob || blob.size < 500) {
+      alert('Capture failed — image was empty. Please try again.');
+      return;
+    }
+
+    const file = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
+
+    // Close camera
+    closeCamera();
+
+    const handlers = {
+      eye  : handleEyeFile,
+      skin : handleSkinFile,
+      body : handleBodyFile,
+      face : handleFaceFile,
+    };
+    const runners = {
+      eye  : runEyePrediction,
+      skin : runSkinPrediction,
+      body : runBodyPrediction,
+      face : runFacePrediction,
+    };
+
+    if(handlers[capturedModule]) {
+      // Load file into module — sets preview + enables predict button
+      handlers[capturedModule](file);
+
+      // Run prediction after UI has updated
+      setTimeout(() => {
+        if(runners[capturedModule]) runners[capturedModule]();
+      }, 500);
+    }
+  }, 'image/jpeg', 1.0);
+}
 
 // ── NAVIGATION ───────────────────────────────────────────────
 const PAGES  = ['home','eye','skin','body','face','dashboard'];
