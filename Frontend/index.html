@@ -716,9 +716,70 @@ input[type=range] { width:100%; accent-color:var(--accent); }
   border-color: var(--accent);
   transform: translateY(-1px);
 }
+
+/* ═══════════════════════════════════════════════════
+   RESPONSIVENESS
+   ═══════════════════════════════════════════════════ */
+.menu-toggle {
+  display: none;
+  background: none; border: none; color: var(--text);
+  font-size: 22px; cursor: pointer;
+  width: 38px; height: 38px;
+  align-items: center; justify-content: center;
+  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+  margin-right: 12px;
+}
+.menu-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+.sidebar-overlay {
+  display: none;
+  position: fixed; inset: 0; z-index: 998;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+  opacity: 0; transition: opacity 0.3s;
+}
+.sidebar-overlay.active { display: block; opacity: 1; }
+
+@media (max-width: 1024px) {
+  .sidebar {
+    position: fixed; left: -252px; z-index: 1000;
+    transition: left 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 20px 0 50px rgba(0,0,0,0.5);
+  }
+  .sidebar.open { left: 0; }
+  .menu-toggle { display: flex; }
+  
+  .content { padding: 24px 20px; }
+  .topbar { padding: 14px 20px; }
+  
+  .modules-grid { grid-template-columns: 1fr; max-width: 500px; }
+  .analysis-grid { grid-template-columns: 1fr; }
+  
+  .hero h1 { font-size: 40px; }
+  .hero p { font-size: 15px; margin-bottom: 32px; }
+  .hero { padding: 36px 16px 24px; }
+}
+
+@media (max-width: 768px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .dash-row { grid-template-columns: 1fr; }
+  .topbar-right .online-pill { display: none; } /* Hide pill on very small screens to save space */
+  .lang-btn { padding: 6px 12px; font-size: 11px; }
+}
+
+@media (max-width: 480px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .risk-banner { flex-direction: column; align-items: center; text-align: center; }
+  .risk-icon { margin-bottom: 8px; }
+  .page-heading { font-size: 19px; }
+  .page-sub { font-size: 10px; }
+}
 </style>
 </head>
 <body>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
 <div class="shell">
 
 <!-- ══════════════════════════════════════════
@@ -804,9 +865,12 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 
   <!-- TOPBAR -->
   <div class="topbar">
-    <div class="topbar-left">
-      <div class="page-heading" id="topbar-title">Home</div>
-      <div class="page-sub"    id="topbar-sub">NeoScan AI — Neonatal Diagnostic Platform</div>
+    <div class="topbar-left" style="display:flex; align-items:center;">
+      <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+      <div>
+        <div class="page-heading" id="topbar-title">Home</div>
+        <div class="page-sub"    id="topbar-sub">NeoScan AI — Neonatal Diagnostic Platform</div>
+      </div>
     </div>
     <div class="topbar-right">
       <button class="lang-btn" id="lang-toggle" onclick="toggleLanguage()">🌐 हिंदी</button>
@@ -1414,6 +1478,19 @@ function showPage(name) {
   const titles = (currentLang==='hi' && TITLES_HI && TITLES_HI[name]) ? TITLES_HI[name] : TITLES[name];
   document.getElementById('topbar-title').textContent = titles[0];
   document.getElementById('topbar-sub').textContent   = titles[1];
+
+  // Auto-close sidebar on mobile after selection
+  if(window.innerWidth <= 1024) {
+    const sidebar = document.querySelector('.sidebar');
+    if(sidebar.classList.contains('open')) toggleSidebar();
+  }
+}
+
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  sidebar.classList.toggle('open');
+  overlay.classList.toggle('active');
 }
 
 // ════════════════════════════════════════════════════
