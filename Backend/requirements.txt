@@ -8,4 +8,4 @@ tensorflow-cpu
 torch
 torchvision
 timm
-gdown
+huggingface_hub

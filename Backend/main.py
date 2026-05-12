@@ -2,7 +2,7 @@
 NEOSCAN AI — FastAPI Backend
 Serves EfficientNetB4 (Eye) + EfficientNetB3 (Skin) + ResNet50 (Body) + VGG16+ViT (Face)
 LAZY LOADING: models load on first request — fixes Render startup timeout.
-AUTO DOWNLOAD: model files downloaded from Google Drive on first use.
+AUTO DOWNLOAD: model files downloaded from Hugging Face on first use.
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -11,46 +11,40 @@ import numpy as np
 import cv2
 import json
 import os
-import io
 from PIL import Image
 
 # ═══════════════════════════════════════════════════════════════
-#  GOOGLE DRIVE AUTO-DOWNLOAD
-#  keras  = link5 → 1_XVbfd3zO3QkKpL_z09hjmkcSR78hVWM
-#  body   = link4 → 1aVxtW_U31iawoLY_4ks02M_hLl0Xobte
-#  json   = link3 → 1_ybj8ftbnlmMJEliM9Tn4QzlbuLQLh9H
-#  ViT    = link2 → 15WgHjdnazncKSwVMslX_iJs_oIJvsXNA
-#  VGG    = link1 → 1ZB5VGQ6-4tb1eEdpHFvj_vSy3J7eW4fS
-#  skin   = first → 1s2AnJJLCMByfSlmMwqc7LlXN3QzDU_gM
+#  HUGGING FACE AUTO-DOWNLOAD
 # ═══════════════════════════════════════════════════════════════
-DRIVE_FILES = {
-    "neoscan_eye_FINAL_effb4.keras" : "1_XVbfd3zO3QkKpL_z09hjmkcSR78hVWM",
-    "body_model.pth"                : "1aVxtW_U31iawoLY_4ks02M_hLl0Xobte",
-    "eye_model_config_FINAL.json"   : "1_ybj8ftbnlmMJEliM9Tn4QzlbuLQLh9H",
-    "ViT_v2_best.pth"               : "15WgHjdnazncKSwVMslX_iJs_oIJvsXNA",
-    "VGG16_best.pth"                : "1ZB5VGQ6-4tb1eEdpHFvj_vSy3J7eW4fS",
-    "best_model.pth"                : "1s2AnJJLCMByfSlmMwqc7LlXN3QzDU_gM",
-}
+HF_REPO_ID = "amine/neoscan-models"
+HF_TOKEN   = os.environ.get("HF_TOKEN", "")
+
+HF_FILES = [
+    "neoscan_eye_FINAL_effb4.keras",
+    "eye_model_config_FINAL.json",
+    "best_model.pth",
+    "body_model.pth",
+    "VGG16_best.pth",
+    "ViT_v2_best.pth",
+]
 
 def ensure_file(filename: str):
-    """Download from Google Drive if file not present."""
+    """Download from Hugging Face if file not present locally."""
     if os.path.exists(filename):
         return
-    file_id = DRIVE_FILES.get(filename)
-    if not file_id:
-        return
     try:
-        import gdown
-        url = f"https://drive.google.com/uc?id={file_id}"
-        print(f"⬇️  Downloading {filename} from Google Drive...")
-        gdown.download(url, filename, quiet=False)
-        if os.path.exists(filename):
-            size_mb = os.path.getsize(filename) / (1024 * 1024)
-            print(f"✅ {filename} downloaded ({size_mb:.1f} MB)")
-        else:
-            print(f"❌ Download failed for {filename}")
+        from huggingface_hub import hf_hub_download
+        print(f"⬇️  Downloading {filename} from Hugging Face...")
+        path = hf_hub_download(
+            repo_id   = HF_REPO_ID,
+            filename  = filename,
+            token     = HF_TOKEN,
+            repo_type = "model",
+            local_dir = "."
+        )
+        print(f"✅ {filename} ready ({os.path.getsize(path)/1024/1024:.1f} MB)")
     except Exception as e:
-        print(f"❌ Error downloading {filename}: {e}")
+        print(f"❌ Failed to download {filename}: {e}")
 
 app = FastAPI(title="NeoScan AI API", version="4.0.0")
 
@@ -112,8 +106,7 @@ def ensure_eye_loaded():
 def apply_clahe(img):
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
+    l = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(l)
     return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
 def preprocess_eye(image_bytes, image_type="rop"):
@@ -123,7 +116,7 @@ def preprocess_eye(image_bytes, image_type="rop"):
     if img is None:
         raise ValueError("Could not decode image")
     if image_type == "rop":
-        img = cv2.addWeighted(img, 4, cv2.GaussianBlur(img, (0, 0), 10), -4, 128)
+        img = cv2.addWeighted(img, 4, cv2.GaussianBlur(img, (0,0), 10), -4, 128)
     img = cv2.resize(img, (380, 380))
     img = apply_clahe(img)
     img = tf.keras.applications.efficientnet.preprocess_input(img.astype("float32"))
@@ -137,14 +130,14 @@ SKIN_DEVICE = None
 SKIN_LOADED = False
 
 SKIN_CLASS_NAMES  = ['anemia', 'cyanosis', 'jaundice', 'normal']
-SKIN_IDX_TO_CLASS = {0: 'anemia', 1: 'cyanosis', 2: 'jaundice', 3: 'normal'}
+SKIN_IDX_TO_CLASS = {0:'anemia', 1:'cyanosis', 2:'jaundice', 3:'normal'}
 SKIN_RISK = {
-    "anemia"  : {"level": "MODERATE", "color": "#f97316", "advice": "Obtain CBC. Check haemoglobin. Assess for haemolysis. Pale skin tone suggests possible anaemia."},
-    "cyanosis": {"level": "CRITICAL", "color": "#ef4444", "advice": "URGENT: Check O₂ saturation immediately. May indicate cardiac or respiratory issue. Escalate now."},
-    "jaundice": {"level": "MODERATE", "color": "#f59e0b", "advice": "Check bilirubin levels. Consider phototherapy if bilirubin >15 mg/dL. Monitor closely."},
-    "normal"  : {"level": "NORMAL",   "color": "#22c55e", "advice": "Skin tone appears normal. No signs of jaundice, cyanosis or anaemia detected. Routine monitoring."},
+    "anemia"  : {"level":"MODERATE","color":"#f97316","advice":"Obtain CBC. Check haemoglobin. Assess for haemolysis. Pale skin tone suggests possible anaemia."},
+    "cyanosis": {"level":"CRITICAL","color":"#ef4444","advice":"URGENT: Check O₂ saturation immediately. May indicate cardiac or respiratory issue. Escalate now."},
+    "jaundice": {"level":"MODERATE","color":"#f59e0b","advice":"Check bilirubin levels. Consider phototherapy if bilirubin >15 mg/dL. Monitor closely."},
+    "normal"  : {"level":"NORMAL",  "color":"#22c55e","advice":"Skin tone appears normal. No signs of jaundice, cyanosis or anaemia detected. Routine monitoring."},
 }
-SKIN_LABELS = {"anemia": "Anaemia", "cyanosis": "Cyanosis", "jaundice": "Jaundice", "normal": "Normal Skin"}
+SKIN_LABELS = {"anemia":"Anaemia","cyanosis":"Cyanosis","jaundice":"Jaundice","normal":"Normal Skin"}
 SKIN_MEAN   = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 SKIN_STD    = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -167,9 +160,13 @@ def ensure_skin_loaded():
                 backbone = efficientnet_b3(weights=None)
                 self.features   = backbone.features
                 self.avgpool    = backbone.avgpool
-                self.classifier = nn.Sequential(nn.Dropout(p=0.4, inplace=True), nn.Linear(backbone.classifier[1].in_features, num_classes))
+                self.classifier = nn.Sequential(
+                    nn.Dropout(p=0.4, inplace=True),
+                    nn.Linear(backbone.classifier[1].in_features, num_classes)
+                )
             def forward(self, x):
-                x = self.features(x); x = self.avgpool(x); return self.classifier(torch.flatten(x, 1))
+                x = self.features(x); x = self.avgpool(x)
+                return self.classifier(torch.flatten(x, 1))
 
         model = NeoScanSkinModel(4).to(SKIN_DEVICE)
         ckpt  = torch.load("best_model.pth", map_location=SKIN_DEVICE)
@@ -214,10 +211,10 @@ BODY_DEVICE = None
 BODY_LOADED = False
 
 BODY_RISK   = {
-    "normal"  : {"level": "NORMAL", "color": "#22c55e", "advice": "Body posture appears normal. Limb symmetry detected. Routine monitoring."},
-    "abnormal": {"level": "HIGH",   "color": "#ef4444", "advice": "Abnormal body posture detected. Possible limb asymmetry, hydrops or restricted movement. Immediate pediatric review required."},
+    "normal"  : {"level":"NORMAL","color":"#22c55e","advice":"Body posture appears normal. Limb symmetry detected. Routine monitoring."},
+    "abnormal": {"level":"HIGH",  "color":"#ef4444","advice":"Abnormal body posture detected. Possible limb asymmetry, hydrops or restricted movement. Immediate pediatric review required."},
 }
-BODY_LABELS = {"normal": "Normal Posture", "abnormal": "Abnormal Posture"}
+BODY_LABELS = {"normal":"Normal Posture","abnormal":"Abnormal Posture"}
 BODY_MEAN   = [0.485, 0.456, 0.406]
 BODY_STD    = [0.229, 0.224, 0.225]
 
@@ -239,7 +236,12 @@ def ensure_body_loaded():
                 super().__init__()
                 base = models.resnet50(weights=None)
                 self.backbone = nn.Sequential(*list(base.children())[:-1])
-                self.head = nn.Sequential(nn.Flatten(), nn.Linear(2048,512), nn.BatchNorm1d(512), nn.ReLU(), nn.Dropout(0.4), nn.Linear(512,128), nn.ReLU(), nn.Dropout(0.3), nn.Linear(128,2))
+                self.head = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(2048,512), nn.BatchNorm1d(512), nn.ReLU(), nn.Dropout(0.4),
+                    nn.Linear(512,128),  nn.ReLU(), nn.Dropout(0.3),
+                    nn.Linear(128,2)
+                )
             def forward(self, x): return self.head(self.backbone(x))
 
         model = NeoScanNet().to(BODY_DEVICE)
@@ -266,16 +268,16 @@ FACE_VIT    = None
 FACE_DEVICE = None
 FACE_LOADED = False
 
-FACE_CLASS_NAMES = ['Cleft', 'DownSyndrome', 'Healthy']
-FACE_IDX2LABEL   = {0: 'Cleft', 1: 'DownSyndrome', 2: 'Healthy'}
+FACE_CLASS_NAMES = ['Cleft','DownSyndrome','Healthy']
+FACE_IDX2LABEL   = {0:'Cleft',1:'DownSyndrome',2:'Healthy'}
 FACE_MEAN        = [0.485, 0.456, 0.406]
 FACE_STD         = [0.229, 0.224, 0.225]
 FACE_RISK = {
-    'Cleft'       : {'level':'HIGH',   'color':'#ef4444', 'advice':'Cleft lip/palate detected. Refer to craniofacial surgery team immediately. Pre-surgical evaluation recommended.'},
-    'DownSyndrome': {'level':'HIGH',   'color':'#f97316', 'advice':'Down Syndrome facial features detected. Refer to genetics team. Cardiac screening and developmental assessment required.'},
-    'Healthy'     : {'level':'NORMAL', 'color':'#22c55e', 'advice':'No facial abnormalities detected. Normal neonatal facial features. Routine monitoring recommended.'},
+    'Cleft'       : {'level':'HIGH',  'color':'#ef4444','advice':'Cleft lip/palate detected. Refer to craniofacial surgery team immediately. Pre-surgical evaluation recommended.'},
+    'DownSyndrome': {'level':'HIGH',  'color':'#f97316','advice':'Down Syndrome facial features detected. Refer to genetics team. Cardiac screening and developmental assessment required.'},
+    'Healthy'     : {'level':'NORMAL','color':'#22c55e','advice':'No facial abnormalities detected. Normal neonatal facial features. Routine monitoring recommended.'},
 }
-FACE_LABELS = {'Cleft':'Cleft Lip / Palate', 'DownSyndrome':'Down Syndrome', 'Healthy':'Healthy — Normal'}
+FACE_LABELS = {'Cleft':'Cleft Lip / Palate','DownSyndrome':'Down Syndrome','Healthy':'Healthy — Normal'}
 
 def ensure_face_loaded():
     global FACE_VGG, FACE_VIT, FACE_DEVICE, FACE_LOADED
@@ -294,7 +296,13 @@ def ensure_face_loaded():
                 super().__init__()
                 vgg = models.vgg16(weights=None)
                 self.features = vgg.features; self.avgpool = vgg.avgpool
-                self.classifier = nn.Sequential(nn.Flatten(), nn.Linear(512*7*7,1024), nn.BatchNorm1d(1024), nn.ReLU(True), nn.Dropout(0.65), nn.Linear(1024,512), nn.BatchNorm1d(512), nn.ReLU(True), nn.Dropout(0.5), nn.Linear(512,128), nn.ReLU(True), nn.Dropout(0.3), nn.Linear(128,n))
+                self.classifier = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(512*7*7,1024), nn.BatchNorm1d(1024), nn.ReLU(True), nn.Dropout(0.65),
+                    nn.Linear(1024,512),     nn.BatchNorm1d(512),  nn.ReLU(True), nn.Dropout(0.5),
+                    nn.Linear(512,128),      nn.ReLU(True), nn.Dropout(0.3),
+                    nn.Linear(128,n)
+                )
             def forward(self, x): x=self.features(x); x=self.avgpool(x); return self.classifier(x)
 
         if os.path.exists("VGG16_best.pth"):
@@ -309,7 +317,11 @@ def ensure_face_loaded():
                 def __init__(self, n=3, d=0.3):
                     super().__init__()
                     self.vit  = timm.create_model('vit_small_patch16_224', pretrained=False, num_classes=0, drop_rate=d)
-                    self.head = nn.Sequential(nn.LayerNorm(self.vit.embed_dim), nn.Linear(self.vit.embed_dim,256), nn.GELU(), nn.Dropout(d), nn.Linear(256,n))
+                    self.head = nn.Sequential(
+                        nn.LayerNorm(self.vit.embed_dim),
+                        nn.Linear(self.vit.embed_dim,256), nn.GELU(), nn.Dropout(d),
+                        nn.Linear(256,n)
+                    )
                 def forward(self, x): return self.head(self.vit(x))
 
             if os.path.exists("ViT_v2_best.pth"):
@@ -344,11 +356,11 @@ def health():
         "eye_model_loaded" : EYE_MODEL  is not None,
         "skin_model_loaded": SKIN_MODEL is not None,
         "body_model_loaded": BODY_MODEL is not None,
-        "face_model_loaded": FACE_VGG   is not None or FACE_VIT is not None,
+        "face_model_loaded": FACE_VGG is not None or FACE_VIT is not None,
         "eye_mode"         : "live" if EYE_MODEL  is not None else "demo",
         "skin_mode"        : "live" if SKIN_MODEL is not None else "demo",
         "body_mode"        : "live" if BODY_MODEL is not None else "demo",
-        "face_mode"        : "live" if FACE_VGG   is not None or FACE_VIT is not None else "demo",
+        "face_mode"        : "live" if FACE_VGG is not None or FACE_VIT is not None else "demo",
     }
 
 @app.post("/predict/eye")
@@ -358,7 +370,7 @@ async def predict_eye(file: UploadFile = File(...), image_type: str = "rop"):
     ensure_eye_loaded()
     if EYE_MODEL is None:
         import random
-        classes = list(EYE_RISK.keys()); pred = random.choice(classes); probs = np.random.dirichlet(np.ones(6)).tolist(); risk = EYE_RISK[pred]
+        classes=list(EYE_RISK.keys()); pred=random.choice(classes); probs=np.random.dirichlet(np.ones(6)).tolist(); risk=EYE_RISK[pred]
         return {"prediction":pred,"label":EYE_LABELS[pred],"confidence":round(max(probs)*100,2),"risk_level":risk["level"],"risk_color":risk["color"],"advice":risk["advice"],"probabilities":{EYE_LABELS[c]:round(p*100,2) for c,p in zip(classes,probs)},"mode":"demo"}
     try:
         img=preprocess_eye(image_bytes,image_type); probs=EYE_MODEL.predict(img,verbose=0)[0]; pred_idx=int(np.argmax(probs))
