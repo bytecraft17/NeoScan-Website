@@ -1,7 +1,8 @@
 """
 NEOSCAN AI — FastAPI Backend
 Serves EfficientNetB4 (Eye) + EfficientNetB3 (Skin) + ResNet50 (Body) + VGG16+ViT (Face)
-LAZY LOADING: models load on first request, not at startup — fixes Render timeout.
+LAZY LOADING: models load on first request — fixes Render startup timeout.
+AUTO DOWNLOAD: model files downloaded from Google Drive on first use.
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -12,6 +13,44 @@ import json
 import os
 import io
 from PIL import Image
+
+# ═══════════════════════════════════════════════════════════════
+#  GOOGLE DRIVE AUTO-DOWNLOAD
+#  keras  = link5 → 1_XVbfd3zO3QkKpL_z09hjmkcSR78hVWM
+#  body   = link4 → 1aVxtW_U31iawoLY_4ks02M_hLl0Xobte
+#  json   = link3 → 1_ybj8ftbnlmMJEliM9Tn4QzlbuLQLh9H
+#  ViT    = link2 → 15WgHjdnazncKSwVMslX_iJs_oIJvsXNA
+#  VGG    = link1 → 1ZB5VGQ6-4tb1eEdpHFvj_vSy3J7eW4fS
+#  skin   = first → 1s2AnJJLCMByfSlmMwqc7LlXN3QzDU_gM
+# ═══════════════════════════════════════════════════════════════
+DRIVE_FILES = {
+    "neoscan_eye_FINAL_effb4.keras" : "1_XVbfd3zO3QkKpL_z09hjmkcSR78hVWM",
+    "body_model.pth"                : "1aVxtW_U31iawoLY_4ks02M_hLl0Xobte",
+    "eye_model_config_FINAL.json"   : "1_ybj8ftbnlmMJEliM9Tn4QzlbuLQLh9H",
+    "ViT_v2_best.pth"               : "15WgHjdnazncKSwVMslX_iJs_oIJvsXNA",
+    "VGG16_best.pth"                : "1ZB5VGQ6-4tb1eEdpHFvj_vSy3J7eW4fS",
+    "best_model.pth"                : "1s2AnJJLCMByfSlmMwqc7LlXN3QzDU_gM",
+}
+
+def ensure_file(filename: str):
+    """Download from Google Drive if file not present."""
+    if os.path.exists(filename):
+        return
+    file_id = DRIVE_FILES.get(filename)
+    if not file_id:
+        return
+    try:
+        import gdown
+        url = f"https://drive.google.com/uc?id={file_id}"
+        print(f"⬇️  Downloading {filename} from Google Drive...")
+        gdown.download(url, filename, quiet=False)
+        if os.path.exists(filename):
+            size_mb = os.path.getsize(filename) / (1024 * 1024)
+            print(f"✅ {filename} downloaded ({size_mb:.1f} MB)")
+        else:
+            print(f"❌ Download failed for {filename}")
+    except Exception as e:
+        print(f"❌ Error downloading {filename}: {e}")
 
 app = FastAPI(title="NeoScan AI API", version="4.0.0")
 
@@ -26,9 +65,9 @@ app.add_middleware(
 # ═══════════════════════════════════════════════════════════════
 #  EYE MODULE — TensorFlow / EfficientNetB4
 # ═══════════════════════════════════════════════════════════════
-EYE_MODEL       = None
-EYE_CONFIG      = None
-EYE_LOADED      = False   # lazy flag
+EYE_MODEL  = None
+EYE_CONFIG = None
+EYE_LOADED = False
 
 EYE_RISK = {
     "cataract"       : {"level": "HIGH",   "color": "#ef4444", "advice": "Immediate ophthalmology referral required. Cataract or leukocoria detected."},
@@ -38,7 +77,6 @@ EYE_RISK = {
     "stage_2"        : {"level": "MEDIUM", "color": "#f97316", "advice": "Moderate ROP (Stage 2) detected. Urgent ophthalmology review needed within 72 hours."},
     "stage_3"        : {"level": "HIGH",   "color": "#ef4444", "advice": "Severe ROP (Stage 3 / AP-ROP) detected. Immediate treatment required."},
 }
-
 EYE_LABELS = {
     "cataract"       : "Cataract / Leukocoria",
     "normal_eye"     : "Normal Eye",
@@ -53,27 +91,23 @@ def ensure_eye_loaded():
     if EYE_LOADED:
         return
     EYE_LOADED = True
+    ensure_file("neoscan_eye_FINAL_effb4.keras")
+    ensure_file("eye_model_config_FINAL.json")
     try:
         import tensorflow as tf
-        MODEL_PATH  = os.environ.get("EYE_MODEL_PATH",  "neoscan_eye_FINAL_effb4.keras")
-        CONFIG_PATH = os.environ.get("EYE_CONFIG_PATH", "eye_model_config_FINAL.json")
-        if os.path.exists(MODEL_PATH):
-            EYE_MODEL = tf.keras.models.load_model(MODEL_PATH)
-            print(f"✅ Eye model loaded from {MODEL_PATH}")
+        if os.path.exists("neoscan_eye_FINAL_effb4.keras"):
+            EYE_MODEL = tf.keras.models.load_model("neoscan_eye_FINAL_effb4.keras")
+            print("✅ Eye model loaded")
         else:
-            print(f"⚠️  Eye model not found at {MODEL_PATH} — running in DEMO mode")
-        if os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH) as f:
+            print("⚠️  Eye model not found — DEMO mode")
+        if os.path.exists("eye_model_config_FINAL.json"):
+            with open("eye_model_config_FINAL.json") as f:
                 EYE_CONFIG = json.load(f)
         else:
-            EYE_CONFIG = {
-                "idx_to_class": {
-                    "0": "cataract", "1": "normal_eye", "2": "stage_0_normal",
-                    "3": "stage_1",  "4": "stage_2",   "5": "stage_3"
-                }
-            }
+            EYE_CONFIG = {"idx_to_class": {"0":"cataract","1":"normal_eye","2":"stage_0_normal","3":"stage_1","4":"stage_2","5":"stage_3"}}
     except Exception as e:
-        print(f"⚠️  Eye model load error: {e} — running in DEMO mode")
+        print(f"⚠️  Eye load error: {e} — DEMO mode")
+        EYE_CONFIG = {"idx_to_class": {"0":"cataract","1":"normal_eye","2":"stage_0_normal","3":"stage_1","4":"stage_2","5":"stage_3"}}
 
 def apply_clahe(img):
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
@@ -89,57 +123,43 @@ def preprocess_eye(image_bytes, image_type="rop"):
     if img is None:
         raise ValueError("Could not decode image")
     if image_type == "rop":
-        img = cv2.addWeighted(img, 4,
-                  cv2.GaussianBlur(img, (0, 0), 10), -4, 128)
+        img = cv2.addWeighted(img, 4, cv2.GaussianBlur(img, (0, 0), 10), -4, 128)
     img = cv2.resize(img, (380, 380))
     img = apply_clahe(img)
-    img = tf.keras.applications.efficientnet.preprocess_input(
-              img.astype("float32"))
+    img = tf.keras.applications.efficientnet.preprocess_input(img.astype("float32"))
     return np.expand_dims(img, axis=0)
 
 # ═══════════════════════════════════════════════════════════════
 #  SKIN MODULE — PyTorch / EfficientNetB3
 # ═══════════════════════════════════════════════════════════════
-SKIN_MODEL      = None
-SKIN_DEVICE     = None
-SKIN_LOADED     = False   # lazy flag
+SKIN_MODEL  = None
+SKIN_DEVICE = None
+SKIN_LOADED = False
 
 SKIN_CLASS_NAMES  = ['anemia', 'cyanosis', 'jaundice', 'normal']
 SKIN_IDX_TO_CLASS = {0: 'anemia', 1: 'cyanosis', 2: 'jaundice', 3: 'normal'}
-
 SKIN_RISK = {
-    "anemia"   : {"level": "MODERATE", "color": "#f97316", "advice": "Obtain CBC. Check haemoglobin. Assess for haemolysis. Pale skin tone suggests possible anaemia."},
-    "cyanosis" : {"level": "CRITICAL", "color": "#ef4444", "advice": "URGENT: Check O₂ saturation immediately. May indicate cardiac or respiratory issue. Escalate now."},
-    "jaundice" : {"level": "MODERATE", "color": "#f59e0b", "advice": "Check bilirubin levels. Consider phototherapy if bilirubin >15 mg/dL. Monitor closely."},
-    "normal"   : {"level": "NORMAL",   "color": "#22c55e", "advice": "Skin tone appears normal. No signs of jaundice, cyanosis or anaemia detected. Routine monitoring."},
+    "anemia"  : {"level": "MODERATE", "color": "#f97316", "advice": "Obtain CBC. Check haemoglobin. Assess for haemolysis. Pale skin tone suggests possible anaemia."},
+    "cyanosis": {"level": "CRITICAL", "color": "#ef4444", "advice": "URGENT: Check O₂ saturation immediately. May indicate cardiac or respiratory issue. Escalate now."},
+    "jaundice": {"level": "MODERATE", "color": "#f59e0b", "advice": "Check bilirubin levels. Consider phototherapy if bilirubin >15 mg/dL. Monitor closely."},
+    "normal"  : {"level": "NORMAL",   "color": "#22c55e", "advice": "Skin tone appears normal. No signs of jaundice, cyanosis or anaemia detected. Routine monitoring."},
 }
-
-SKIN_LABELS = {
-    "anemia"   : "Anaemia",
-    "cyanosis" : "Cyanosis",
-    "jaundice" : "Jaundice",
-    "normal"   : "Normal Skin",
-}
-
-SKIN_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-SKIN_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+SKIN_LABELS = {"anemia": "Anaemia", "cyanosis": "Cyanosis", "jaundice": "Jaundice", "normal": "Normal Skin"}
+SKIN_MEAN   = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+SKIN_STD    = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 def ensure_skin_loaded():
     global SKIN_MODEL, SKIN_DEVICE, SKIN_LOADED
     if SKIN_LOADED:
         return
     SKIN_LOADED = True
+    ensure_file("best_model.pth")
     try:
-        import torch
-        import torch.nn as nn
+        import torch, torch.nn as nn
         from torchvision.models import efficientnet_b3
-
         SKIN_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        MODEL_PATH  = os.environ.get("SKIN_MODEL_PATH", "best_model.pth")
-
-        if not os.path.exists(MODEL_PATH):
-            print(f"⚠️  Skin model not found at {MODEL_PATH} — running in DEMO mode")
-            return
+        if not os.path.exists("best_model.pth"):
+            print("⚠️  Skin model not found — DEMO mode"); return
 
         class NeoScanSkinModel(nn.Module):
             def __init__(self, num_classes=4):
@@ -147,256 +167,168 @@ def ensure_skin_loaded():
                 backbone = efficientnet_b3(weights=None)
                 self.features   = backbone.features
                 self.avgpool    = backbone.avgpool
-                self.classifier = nn.Sequential(
-                    nn.Dropout(p=0.4, inplace=True),
-                    nn.Linear(backbone.classifier[1].in_features, num_classes)
-                )
+                self.classifier = nn.Sequential(nn.Dropout(p=0.4, inplace=True), nn.Linear(backbone.classifier[1].in_features, num_classes))
             def forward(self, x):
-                x = self.features(x)
-                x = self.avgpool(x)
-                x = torch.flatten(x, 1)
-                return self.classifier(x)
+                x = self.features(x); x = self.avgpool(x); return self.classifier(torch.flatten(x, 1))
 
-        model = NeoScanSkinModel(num_classes=4).to(SKIN_DEVICE)
-        ckpt  = torch.load(MODEL_PATH, map_location=SKIN_DEVICE)
+        model = NeoScanSkinModel(4).to(SKIN_DEVICE)
+        ckpt  = torch.load("best_model.pth", map_location=SKIN_DEVICE)
         model.load_state_dict(ckpt['model_state_dict'])
-        model.eval()
-        SKIN_MODEL = model
-        print(f"✅ Skin model loaded from {MODEL_PATH}  (epoch {ckpt.get('epoch','?')}, val_acc={ckpt.get('val_acc',0):.4f})")
+        model.eval(); SKIN_MODEL = model
+        print("✅ Skin model loaded")
     except Exception as e:
-        print(f"⚠️  Skin model load error: {e} — running in DEMO mode")
+        print(f"⚠️  Skin load error: {e} — DEMO mode")
 
 def white_balance(img):
-    img_float = img.astype(np.float32)
-    avg_b = np.mean(img_float[:, :, 0])
-    avg_g = np.mean(img_float[:, :, 1])
-    avg_r = np.mean(img_float[:, :, 2])
-    avg_gray = (avg_b + avg_g + avg_r) / 3.0
-    img_float[:, :, 0] = np.clip(img_float[:, :, 0] * (avg_gray / avg_b), 0, 255)
-    img_float[:, :, 1] = np.clip(img_float[:, :, 1] * (avg_gray / avg_g), 0, 255)
-    img_float[:, :, 2] = np.clip(img_float[:, :, 2] * (avg_gray / avg_r), 0, 255)
-    return img_float.astype(np.uint8)
+    f = img.astype(np.float32)
+    avg_b, avg_g, avg_r = np.mean(f[:,:,0]), np.mean(f[:,:,1]), np.mean(f[:,:,2])
+    g = (avg_b + avg_g + avg_r) / 3.0
+    f[:,:,0] = np.clip(f[:,:,0]*(g/avg_b), 0, 255)
+    f[:,:,1] = np.clip(f[:,:,1]*(g/avg_g), 0, 255)
+    f[:,:,2] = np.clip(f[:,:,2]*(g/avg_r), 0, 255)
+    return f.astype(np.uint8)
 
 def apply_skin_clahe(img):
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
+    l = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(l)
     return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
 def preprocess_skin(image_bytes):
     import torch
     nparr = np.frombuffer(image_bytes, np.uint8)
     img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Could not decode image")
+    if img is None: raise ValueError("Could not decode image")
     img = white_balance(img)
     img = apply_skin_clahe(img)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = cv2.resize(img, (224, 224))
-    img = img.astype(np.float32) / 255.0
-    img = (img - SKIN_MEAN) / SKIN_STD
-    img = np.transpose(img, (2, 0, 1))
-    tensor = torch.from_numpy(img).unsqueeze(0).to(SKIN_DEVICE)
-    return tensor
+    img = (img.astype(np.float32)/255.0 - SKIN_MEAN) / SKIN_STD
+    return torch.from_numpy(np.transpose(img, (2,0,1))).unsqueeze(0).to(SKIN_DEVICE)
 
 # ═══════════════════════════════════════════════════════════════
 #  BODY MODULE — PyTorch / ResNet50
 # ═══════════════════════════════════════════════════════════════
-BODY_MODEL      = None
-BODY_DEVICE     = None
-BODY_LOADED     = False   # lazy flag
+BODY_MODEL  = None
+BODY_DEVICE = None
+BODY_LOADED = False
 
-BODY_RISK = {
-    "normal"   : {"level": "NORMAL", "color": "#22c55e",
-                  "advice": "Body posture appears normal. Limb symmetry detected. Routine monitoring."},
-    "abnormal" : {"level": "HIGH",   "color": "#ef4444",
-                  "advice": "Abnormal body posture detected. Possible limb asymmetry, hydrops or restricted movement. Immediate pediatric review required."},
+BODY_RISK   = {
+    "normal"  : {"level": "NORMAL", "color": "#22c55e", "advice": "Body posture appears normal. Limb symmetry detected. Routine monitoring."},
+    "abnormal": {"level": "HIGH",   "color": "#ef4444", "advice": "Abnormal body posture detected. Possible limb asymmetry, hydrops or restricted movement. Immediate pediatric review required."},
 }
-
-BODY_LABELS = {
-    "normal"  : "Normal Posture",
-    "abnormal": "Abnormal Posture",
-}
-
-BODY_MEAN = [0.485, 0.456, 0.406]
-BODY_STD  = [0.229, 0.224, 0.225]
+BODY_LABELS = {"normal": "Normal Posture", "abnormal": "Abnormal Posture"}
+BODY_MEAN   = [0.485, 0.456, 0.406]
+BODY_STD    = [0.229, 0.224, 0.225]
 
 def ensure_body_loaded():
     global BODY_MODEL, BODY_DEVICE, BODY_LOADED
     if BODY_LOADED:
         return
     BODY_LOADED = True
+    ensure_file("body_model.pth")
     try:
-        import torch
-        import torch.nn as nn
+        import torch, torch.nn as nn
         from torchvision import models
-
         BODY_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        MODEL_PATH  = os.environ.get("BODY_MODEL_PATH", "body_model.pth")
-
-        if not os.path.exists(MODEL_PATH):
-            print(f"⚠️  Body model not found at {MODEL_PATH} — running in DEMO mode")
-            return
+        if not os.path.exists("body_model.pth"):
+            print("⚠️  Body model not found — DEMO mode"); return
 
         class NeoScanNet(nn.Module):
             def __init__(self):
                 super().__init__()
                 base = models.resnet50(weights=None)
                 self.backbone = nn.Sequential(*list(base.children())[:-1])
-                self.head = nn.Sequential(
-                    nn.Flatten(),
-                    nn.Linear(2048, 512), nn.BatchNorm1d(512), nn.ReLU(),
-                    nn.Dropout(0.4),
-                    nn.Linear(512, 128), nn.ReLU(),
-                    nn.Dropout(0.3),
-                    nn.Linear(128, 2)
-                )
-            def forward(self, x):
-                return self.head(self.backbone(x))
+                self.head = nn.Sequential(nn.Flatten(), nn.Linear(2048,512), nn.BatchNorm1d(512), nn.ReLU(), nn.Dropout(0.4), nn.Linear(512,128), nn.ReLU(), nn.Dropout(0.3), nn.Linear(128,2))
+            def forward(self, x): return self.head(self.backbone(x))
 
         model = NeoScanNet().to(BODY_DEVICE)
-        ckpt  = torch.load(MODEL_PATH, map_location=BODY_DEVICE)
-        state = ckpt.get("model_state_dict", ckpt)
-        model.load_state_dict(state)
-        model.eval()
-        BODY_MODEL = model
-        print(f"✅ Body model loaded from {MODEL_PATH}")
+        ckpt  = torch.load("body_model.pth", map_location=BODY_DEVICE)
+        model.load_state_dict(ckpt.get("model_state_dict", ckpt))
+        model.eval(); BODY_MODEL = model
+        print("✅ Body model loaded")
     except Exception as e:
-        print(f"⚠️  Body model load error: {e} — running in DEMO mode")
+        print(f"⚠️  Body load error: {e} — DEMO mode")
 
 def preprocess_body(image_bytes):
-    import torch
-    import torchvision.transforms as transforms
+    import torch, torchvision.transforms as T
     nparr = np.frombuffer(image_bytes, np.uint8)
     img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Could not decode image")
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    pil = Image.fromarray(img)
-    tf  = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(BODY_MEAN, BODY_STD),
-    ])
-    return tf(pil).unsqueeze(0).to(BODY_DEVICE)
+    if img is None: raise ValueError("Could not decode image")
+    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    return T.Compose([T.Resize((224,224)), T.ToTensor(), T.Normalize(BODY_MEAN, BODY_STD)])(pil).unsqueeze(0).to(BODY_DEVICE)
 
 # ═══════════════════════════════════════════════════════════════
 #  FACE MODULE — PyTorch / VGG16 + ViT Ensemble
 # ═══════════════════════════════════════════════════════════════
-FACE_VGG        = None
-FACE_VIT        = None
-FACE_DEVICE     = None
-FACE_LOADED     = False   # lazy flag
+FACE_VGG    = None
+FACE_VIT    = None
+FACE_DEVICE = None
+FACE_LOADED = False
 
 FACE_CLASS_NAMES = ['Cleft', 'DownSyndrome', 'Healthy']
 FACE_IDX2LABEL   = {0: 'Cleft', 1: 'DownSyndrome', 2: 'Healthy'}
-FACE_MEAN = [0.485, 0.456, 0.406]
-FACE_STD  = [0.229, 0.224, 0.225]
-IMG_SIZE_FACE = 224
-
+FACE_MEAN        = [0.485, 0.456, 0.406]
+FACE_STD         = [0.229, 0.224, 0.225]
 FACE_RISK = {
-    'Cleft'       : {'level': 'HIGH',   'color': '#ef4444',
-                     'advice': 'Cleft lip/palate detected. Refer to craniofacial surgery team immediately. Pre-surgical evaluation recommended.'},
-    'DownSyndrome': {'level': 'HIGH',   'color': '#f97316',
-                     'advice': 'Down Syndrome facial features detected. Refer to genetics team. Cardiac screening and developmental assessment required.'},
-    'Healthy'     : {'level': 'NORMAL', 'color': '#22c55e',
-                     'advice': 'No facial abnormalities detected. Normal neonatal facial features. Routine monitoring recommended.'},
+    'Cleft'       : {'level':'HIGH',   'color':'#ef4444', 'advice':'Cleft lip/palate detected. Refer to craniofacial surgery team immediately. Pre-surgical evaluation recommended.'},
+    'DownSyndrome': {'level':'HIGH',   'color':'#f97316', 'advice':'Down Syndrome facial features detected. Refer to genetics team. Cardiac screening and developmental assessment required.'},
+    'Healthy'     : {'level':'NORMAL', 'color':'#22c55e', 'advice':'No facial abnormalities detected. Normal neonatal facial features. Routine monitoring recommended.'},
 }
-
-FACE_LABELS = {
-    'Cleft'       : 'Cleft Lip / Palate',
-    'DownSyndrome': 'Down Syndrome',
-    'Healthy'     : 'Healthy — Normal',
-}
+FACE_LABELS = {'Cleft':'Cleft Lip / Palate', 'DownSyndrome':'Down Syndrome', 'Healthy':'Healthy — Normal'}
 
 def ensure_face_loaded():
     global FACE_VGG, FACE_VIT, FACE_DEVICE, FACE_LOADED
     if FACE_LOADED:
         return
     FACE_LOADED = True
+    ensure_file("VGG16_best.pth")
+    ensure_file("ViT_v2_best.pth")
     try:
-        import torch
-        import torch.nn as nn
+        import torch, torch.nn as nn
         from torchvision import models
-
         FACE_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         class VGG16Classifier(nn.Module):
-            def __init__(self, num_classes=3):
+            def __init__(self, n=3):
                 super().__init__()
                 vgg = models.vgg16(weights=None)
-                self.features   = vgg.features
-                self.avgpool    = vgg.avgpool
-                self.classifier = nn.Sequential(
-                    nn.Flatten(),
-                    nn.Linear(512 * 7 * 7, 1024), nn.BatchNorm1d(1024), nn.ReLU(inplace=True), nn.Dropout(0.65),
-                    nn.Linear(1024, 512),          nn.BatchNorm1d(512),  nn.ReLU(inplace=True), nn.Dropout(0.5),
-                    nn.Linear(512, 128),           nn.ReLU(inplace=True), nn.Dropout(0.3),
-                    nn.Linear(128, num_classes)
-                )
-            def forward(self, x):
-                x = self.features(x); x = self.avgpool(x); return self.classifier(x)
+                self.features = vgg.features; self.avgpool = vgg.avgpool
+                self.classifier = nn.Sequential(nn.Flatten(), nn.Linear(512*7*7,1024), nn.BatchNorm1d(1024), nn.ReLU(True), nn.Dropout(0.65), nn.Linear(1024,512), nn.BatchNorm1d(512), nn.ReLU(True), nn.Dropout(0.5), nn.Linear(512,128), nn.ReLU(True), nn.Dropout(0.3), nn.Linear(128,n))
+            def forward(self, x): x=self.features(x); x=self.avgpool(x); return self.classifier(x)
 
-        vgg_path = os.environ.get('FACE_VGG_PATH', 'VGG16_best.pth')
-        if os.path.exists(vgg_path):
-            vgg = VGG16Classifier(num_classes=3).to(FACE_DEVICE)
-            ckpt = torch.load(vgg_path, map_location=FACE_DEVICE)
-            vgg.load_state_dict(ckpt.get('model_state_dict', ckpt))
-            vgg.eval()
-            FACE_VGG = vgg
-            print(f'✅ Face VGG16 loaded from {vgg_path}')
-        else:
-            print(f'⚠️  Face VGG16 not found at {vgg_path}')
+        if os.path.exists("VGG16_best.pth"):
+            vgg = VGG16Classifier(3).to(FACE_DEVICE)
+            ckpt = torch.load("VGG16_best.pth", map_location=FACE_DEVICE)
+            vgg.load_state_dict(ckpt.get('model_state_dict', ckpt)); vgg.eval(); FACE_VGG = vgg
+            print('✅ Face VGG16 loaded')
 
         try:
             import timm
-
             class ViTFaceClassifier(nn.Module):
-                def __init__(self, num_classes=3, dropout=0.3):
+                def __init__(self, n=3, d=0.3):
                     super().__init__()
-                    self.vit  = timm.create_model('vit_small_patch16_224', pretrained=False,
-                                                   num_classes=0, drop_rate=dropout)
-                    embed_dim = self.vit.embed_dim
-                    self.head = nn.Sequential(
-                        nn.LayerNorm(embed_dim),
-                        nn.Linear(embed_dim, 256), nn.GELU(), nn.Dropout(dropout),
-                        nn.Linear(256, num_classes)
-                    )
-                def forward(self, x):
-                    return self.head(self.vit(x))
+                    self.vit  = timm.create_model('vit_small_patch16_224', pretrained=False, num_classes=0, drop_rate=d)
+                    self.head = nn.Sequential(nn.LayerNorm(self.vit.embed_dim), nn.Linear(self.vit.embed_dim,256), nn.GELU(), nn.Dropout(d), nn.Linear(256,n))
+                def forward(self, x): return self.head(self.vit(x))
 
-            vit_path = os.environ.get('FACE_VIT_PATH', 'ViT_v2_best.pth')
-            if os.path.exists(vit_path):
-                vit = ViTFaceClassifier(num_classes=3).to(FACE_DEVICE)
-                ckpt = torch.load(vit_path, map_location=FACE_DEVICE)
-                vit.load_state_dict(ckpt.get('model_state_dict', ckpt))
-                vit.eval()
-                FACE_VIT = vit
-                print(f'✅ Face ViT loaded from {vit_path}')
-            else:
-                print(f'⚠️  Face ViT not found at {vit_path}')
+            if os.path.exists("ViT_v2_best.pth"):
+                vit = ViTFaceClassifier(3).to(FACE_DEVICE)
+                ckpt = torch.load("ViT_v2_best.pth", map_location=FACE_DEVICE)
+                vit.load_state_dict(ckpt.get('model_state_dict', ckpt)); vit.eval(); FACE_VIT = vit
+                print('✅ Face ViT loaded')
         except ImportError:
-            print('⚠️  timm not installed — ViT not loaded.')
-
+            print('⚠️  timm not installed')
     except Exception as e:
-        print(f'⚠️  Face model load error: {e} — running in DEMO mode')
+        print(f'⚠️  Face load error: {e} — DEMO mode')
 
 def preprocess_face(image_bytes):
-    import torch
-    import torchvision.transforms as T
+    import torch, torchvision.transforms as T
     nparr = np.frombuffer(image_bytes, np.uint8)
     img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError('Could not decode image')
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    pil = Image.fromarray(img)
-    tf  = T.Compose([
-        T.Resize((IMG_SIZE_FACE, IMG_SIZE_FACE)),
-        T.ToTensor(),
-        T.Normalize(FACE_MEAN, FACE_STD),
-    ])
-    return tf(pil).unsqueeze(0).to(FACE_DEVICE)
+    if img is None: raise ValueError('Could not decode image')
+    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    return T.Compose([T.Resize((224,224)), T.ToTensor(), T.Normalize(FACE_MEAN, FACE_STD)])(pil).unsqueeze(0).to(FACE_DEVICE)
 
 # ═══════════════════════════════════════════════════════════════
 #  ROUTES
@@ -408,233 +340,82 @@ def root():
 @app.get("/health")
 def health():
     return {
-        "status"            : "ok",
-        "eye_model_loaded"  : EYE_MODEL  is not None,
-        "skin_model_loaded" : SKIN_MODEL is not None,
-        "body_model_loaded" : BODY_MODEL is not None,
-        "face_model_loaded" : FACE_VGG is not None or FACE_VIT is not None,
-        "eye_mode"          : "live" if EYE_MODEL  is not None else "demo",
-        "skin_mode"         : "live" if SKIN_MODEL is not None else "demo",
-        "body_mode"         : "live" if BODY_MODEL is not None else "demo",
-        "face_mode"         : "live" if FACE_VGG is not None or FACE_VIT is not None else "demo",
+        "status"           : "ok",
+        "eye_model_loaded" : EYE_MODEL  is not None,
+        "skin_model_loaded": SKIN_MODEL is not None,
+        "body_model_loaded": BODY_MODEL is not None,
+        "face_model_loaded": FACE_VGG   is not None or FACE_VIT is not None,
+        "eye_mode"         : "live" if EYE_MODEL  is not None else "demo",
+        "skin_mode"        : "live" if SKIN_MODEL is not None else "demo",
+        "body_mode"        : "live" if BODY_MODEL is not None else "demo",
+        "face_mode"        : "live" if FACE_VGG   is not None or FACE_VIT is not None else "demo",
     }
 
-# ── EYE PREDICTION ────────────────────────────────────────────
 @app.post("/predict/eye")
-async def predict_eye(
-    file: UploadFile = File(...),
-    image_type: str = "rop"
-):
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(400, "File must be an image")
+async def predict_eye(file: UploadFile = File(...), image_type: str = "rop"):
+    if not file.content_type.startswith("image/"): raise HTTPException(400, "File must be an image")
     image_bytes = await file.read()
-
-    ensure_eye_loaded()   # ← lazy load on first call
-
+    ensure_eye_loaded()
     if EYE_MODEL is None:
         import random
-        classes = list(EYE_RISK.keys())
-        pred    = random.choice(classes)
-        probs   = np.random.dirichlet(np.ones(6)).tolist()
-        risk    = EYE_RISK[pred]
-        return {
-            "prediction"   : pred,
-            "label"        : EYE_LABELS[pred],
-            "confidence"   : round(max(probs) * 100, 2),
-            "risk_level"   : risk["level"],
-            "risk_color"   : risk["color"],
-            "advice"       : risk["advice"],
-            "probabilities": {EYE_LABELS[c]: round(p * 100, 2) for c, p in zip(classes, probs)},
-            "mode"         : "demo"
-        }
-
+        classes = list(EYE_RISK.keys()); pred = random.choice(classes); probs = np.random.dirichlet(np.ones(6)).tolist(); risk = EYE_RISK[pred]
+        return {"prediction":pred,"label":EYE_LABELS[pred],"confidence":round(max(probs)*100,2),"risk_level":risk["level"],"risk_color":risk["color"],"advice":risk["advice"],"probabilities":{EYE_LABELS[c]:round(p*100,2) for c,p in zip(classes,probs)},"mode":"demo"}
     try:
-        img        = preprocess_eye(image_bytes, image_type)
-        probs      = EYE_MODEL.predict(img, verbose=0)[0]
-        pred_idx   = int(np.argmax(probs))
-        idx_map    = EYE_CONFIG.get("idx_to_class", {})
-        pred_class = idx_map.get(str(pred_idx), "unknown")
-        risk       = EYE_RISK.get(pred_class, EYE_RISK["normal_eye"])
-        probs_dict = {
-            EYE_LABELS.get(idx_map.get(str(i), ""), str(i)): round(float(p) * 100, 2)
-            for i, p in enumerate(probs)
-        }
-        return {
-            "prediction"   : pred_class,
-            "label"        : EYE_LABELS.get(pred_class, pred_class),
-            "confidence"   : round(float(probs[pred_idx]) * 100, 2),
-            "risk_level"   : risk["level"],
-            "risk_color"   : risk["color"],
-            "advice"       : risk["advice"],
-            "probabilities": probs_dict,
-            "mode"         : "live"
-        }
-    except Exception as e:
-        raise HTTPException(500, f"Eye prediction error: {str(e)}")
+        img=preprocess_eye(image_bytes,image_type); probs=EYE_MODEL.predict(img,verbose=0)[0]; pred_idx=int(np.argmax(probs))
+        idx_map=EYE_CONFIG.get("idx_to_class",{}); pred_class=idx_map.get(str(pred_idx),"unknown"); risk=EYE_RISK.get(pred_class,EYE_RISK["normal_eye"])
+        return {"prediction":pred_class,"label":EYE_LABELS.get(pred_class,pred_class),"confidence":round(float(probs[pred_idx])*100,2),"risk_level":risk["level"],"risk_color":risk["color"],"advice":risk["advice"],"probabilities":{EYE_LABELS.get(idx_map.get(str(i),""),str(i)):round(float(p)*100,2) for i,p in enumerate(probs)},"mode":"live"}
+    except Exception as e: raise HTTPException(500, f"Eye prediction error: {str(e)}")
 
-# ── SKIN PREDICTION ───────────────────────────────────────────
 @app.post("/predict/skin")
 async def predict_skin(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(400, "File must be an image")
+    if not file.content_type.startswith("image/"): raise HTTPException(400, "File must be an image")
     image_bytes = await file.read()
-
-    ensure_skin_loaded()   # ← lazy load on first call
-
+    ensure_skin_loaded()
     if SKIN_MODEL is None:
         import random
-        classes = SKIN_CLASS_NAMES
-        pred    = random.choice(classes)
-        probs   = np.random.dirichlet(np.ones(4)).tolist()
-        risk    = SKIN_RISK[pred]
-        return {
-            "prediction"   : pred,
-            "label"        : SKIN_LABELS[pred],
-            "confidence"   : round(max(probs) * 100, 2),
-            "risk_level"   : risk["level"],
-            "risk_color"   : risk["color"],
-            "advice"       : risk["advice"],
-            "probabilities": {SKIN_LABELS[c]: round(p * 100, 2) for c, p in zip(classes, probs)},
-            "mode"         : "demo"
-        }
-
+        classes=SKIN_CLASS_NAMES; pred=random.choice(classes); probs=np.random.dirichlet(np.ones(4)).tolist(); risk=SKIN_RISK[pred]
+        return {"prediction":pred,"label":SKIN_LABELS[pred],"confidence":round(max(probs)*100,2),"risk_level":risk["level"],"risk_color":risk["color"],"advice":risk["advice"],"probabilities":{SKIN_LABELS[c]:round(p*100,2) for c,p in zip(classes,probs)},"mode":"demo"}
     try:
         import torch
-        tensor     = preprocess_skin(image_bytes)
-        with torch.no_grad():
-            logits = SKIN_MODEL(tensor)
-            probs  = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
-        pred_idx   = int(np.argmax(probs))
-        pred_class = SKIN_IDX_TO_CLASS[pred_idx]
-        risk       = SKIN_RISK[pred_class]
-        probs_dict = {
-            SKIN_LABELS[SKIN_IDX_TO_CLASS[i]]: round(float(p) * 100, 2)
-            for i, p in enumerate(probs)
-        }
-        return {
-            "prediction"   : pred_class,
-            "label"        : SKIN_LABELS[pred_class],
-            "confidence"   : round(float(probs[pred_idx]) * 100, 2),
-            "risk_level"   : risk["level"],
-            "risk_color"   : risk["color"],
-            "advice"       : risk["advice"],
-            "probabilities": probs_dict,
-            "mode"         : "live"
-        }
-    except Exception as e:
-        raise HTTPException(500, f"Skin prediction error: {str(e)}")
+        with torch.no_grad(): probs=torch.softmax(SKIN_MODEL(preprocess_skin(image_bytes)),dim=1).squeeze().cpu().numpy()
+        pred_idx=int(np.argmax(probs)); pred_class=SKIN_IDX_TO_CLASS[pred_idx]; risk=SKIN_RISK[pred_class]
+        return {"prediction":pred_class,"label":SKIN_LABELS[pred_class],"confidence":round(float(probs[pred_idx])*100,2),"risk_level":risk["level"],"risk_color":risk["color"],"advice":risk["advice"],"probabilities":{SKIN_LABELS[SKIN_IDX_TO_CLASS[i]]:round(float(p)*100,2) for i,p in enumerate(probs)},"mode":"live"}
+    except Exception as e: raise HTTPException(500, f"Skin prediction error: {str(e)}")
 
-# ── BODY PREDICTION ───────────────────────────────────────────
 @app.post("/predict/body")
 async def predict_body(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(400, "File must be an image")
+    if not file.content_type.startswith("image/"): raise HTTPException(400, "File must be an image")
     image_bytes = await file.read()
-
-    ensure_body_loaded()   # ← lazy load on first call
-
+    ensure_body_loaded()
     if BODY_MODEL is None:
         import random
-        pred   = random.choice(["normal", "abnormal"])
-        probs  = np.random.dirichlet(np.ones(2)).tolist()
-        risk   = BODY_RISK[pred]
-        return {
-            "prediction"   : pred,
-            "label"        : BODY_LABELS[pred],
-            "confidence"   : round(max(probs) * 100, 2),
-            "risk_level"   : risk["level"],
-            "risk_color"   : risk["color"],
-            "advice"       : risk["advice"],
-            "probabilities": {
-                "Normal Posture"  : round(probs[0] * 100, 2),
-                "Abnormal Posture": round(probs[1] * 100, 2),
-            },
-            "mode": "demo"
-        }
-
+        pred=random.choice(["normal","abnormal"]); probs=np.random.dirichlet(np.ones(2)).tolist(); risk=BODY_RISK[pred]
+        return {"prediction":pred,"label":BODY_LABELS[pred],"confidence":round(max(probs)*100,2),"risk_level":risk["level"],"risk_color":risk["color"],"advice":risk["advice"],"probabilities":{"Normal Posture":round(probs[0]*100,2),"Abnormal Posture":round(probs[1]*100,2)},"mode":"demo"}
     try:
         import torch
-        tensor = preprocess_body(image_bytes)
-        with torch.no_grad():
-            logits = BODY_MODEL(tensor)
-            probs  = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
-        pred_idx   = int(np.argmax(probs))
-        pred_class = "normal" if pred_idx == 0 else "abnormal"
-        risk       = BODY_RISK[pred_class]
-        return {
-            "prediction"   : pred_class,
-            "label"        : BODY_LABELS[pred_class],
-            "confidence"   : round(float(probs[pred_idx]) * 100, 2),
-            "risk_level"   : risk["level"],
-            "risk_color"   : risk["color"],
-            "advice"       : risk["advice"],
-            "probabilities": {
-                "Normal Posture"  : round(float(probs[0]) * 100, 2),
-                "Abnormal Posture": round(float(probs[1]) * 100, 2),
-            },
-            "mode": "live"
-        }
-    except Exception as e:
-        raise HTTPException(500, f"Body prediction error: {str(e)}")
+        with torch.no_grad(): probs=torch.softmax(BODY_MODEL(preprocess_body(image_bytes)),dim=1).squeeze().cpu().numpy()
+        pred_idx=int(np.argmax(probs)); pred_class="normal" if pred_idx==0 else "abnormal"; risk=BODY_RISK[pred_class]
+        return {"prediction":pred_class,"label":BODY_LABELS[pred_class],"confidence":round(float(probs[pred_idx])*100,2),"risk_level":risk["level"],"risk_color":risk["color"],"advice":risk["advice"],"probabilities":{"Normal Posture":round(float(probs[0])*100,2),"Abnormal Posture":round(float(probs[1])*100,2)},"mode":"live"}
+    except Exception as e: raise HTTPException(500, f"Body prediction error: {str(e)}")
 
-# ── FACE PREDICTION ───────────────────────────────────────────
 @app.post('/predict/face')
 async def predict_face(file: UploadFile = File(...)):
-    if not file.content_type.startswith('image/'):
-        raise HTTPException(400, 'File must be an image')
+    if not file.content_type.startswith('image/'): raise HTTPException(400, 'File must be an image')
     image_bytes = await file.read()
-
-    ensure_face_loaded()   # ← lazy load on first call
-
+    ensure_face_loaded()
     if FACE_VGG is None and FACE_VIT is None:
         import random
-        pred  = random.choice(FACE_CLASS_NAMES)
-        probs = np.random.dirichlet(np.ones(3)).tolist()
-        risk  = FACE_RISK[pred]
-        return {
-            'prediction'   : pred,
-            'label'        : FACE_LABELS[pred],
-            'confidence'   : round(max(probs) * 100, 2),
-            'risk_level'   : risk['level'],
-            'risk_color'   : risk['color'],
-            'advice'       : risk['advice'],
-            'probabilities': {FACE_LABELS[c]: round(p * 100, 2) for c, p in zip(FACE_CLASS_NAMES, probs)},
-            'mode'         : 'demo',
-            'model_used'   : 'demo'
-        }
-
+        pred=random.choice(FACE_CLASS_NAMES); probs=np.random.dirichlet(np.ones(3)).tolist(); risk=FACE_RISK[pred]
+        return {'prediction':pred,'label':FACE_LABELS[pred],'confidence':round(max(probs)*100,2),'risk_level':risk['level'],'risk_color':risk['color'],'advice':risk['advice'],'probabilities':{FACE_LABELS[c]:round(p*100,2) for c,p in zip(FACE_CLASS_NAMES,probs)},'mode':'demo','model_used':'demo'}
     try:
         import torch
-        tensor = preprocess_face(image_bytes)
-        probs_combined = None
-
+        tensor=preprocess_face(image_bytes); pc=None
         with torch.no_grad():
-            if FACE_VGG is not None:
-                vgg_probs = torch.softmax(FACE_VGG(tensor), dim=1).cpu().numpy()[0]
-                probs_combined = vgg_probs
-            if FACE_VIT is not None:
-                vit_probs = torch.softmax(FACE_VIT(tensor), dim=1).cpu().numpy()[0]
-                if probs_combined is not None:
-                    probs_combined = 0.5 * probs_combined + 0.5 * vit_probs
-                else:
-                    probs_combined = vit_probs
-
-        pred_idx   = int(np.argmax(probs_combined))
-        pred_class = FACE_IDX2LABEL[pred_idx]
-        risk       = FACE_RISK[pred_class]
-        mode       = 'ensemble' if (FACE_VGG and FACE_VIT) else ('vgg16' if FACE_VGG else 'vit')
-
-        return {
-            'prediction'   : pred_class,
-            'label'        : FACE_LABELS[pred_class],
-            'confidence'   : round(float(probs_combined[pred_idx]) * 100, 2),
-            'risk_level'   : risk['level'],
-            'risk_color'   : risk['color'],
-            'advice'       : risk['advice'],
-            'probabilities': {FACE_LABELS[FACE_IDX2LABEL[i]]: round(float(p) * 100, 2)
-                              for i, p in enumerate(probs_combined)},
-            'mode'         : 'live',
-            'model_used'   : mode
-        }
-    except Exception as e:
-        raise HTTPException(500, f'Face prediction error: {str(e)}')
+            if FACE_VGG: pc=torch.softmax(FACE_VGG(tensor),dim=1).cpu().numpy()[0]
+            if FACE_VIT:
+                vp=torch.softmax(FACE_VIT(tensor),dim=1).cpu().numpy()[0]
+                pc=0.5*pc+0.5*vp if pc is not None else vp
+        pred_idx=int(np.argmax(pc)); pred_class=FACE_IDX2LABEL[pred_idx]; risk=FACE_RISK[pred_class]
+        mode='ensemble' if (FACE_VGG and FACE_VIT) else ('vgg16' if FACE_VGG else 'vit')
+        return {'prediction':pred_class,'label':FACE_LABELS[pred_class],'confidence':round(float(pc[pred_idx])*100,2),'risk_level':risk['level'],'risk_color':risk['color'],'advice':risk['advice'],'probabilities':{FACE_LABELS[FACE_IDX2LABEL[i]]:round(float(p)*100,2) for i,p in enumerate(pc)},'mode':'live','model_used':mode}
+    except Exception as e: raise HTTPException(500, f'Face prediction error: {str(e)}')
