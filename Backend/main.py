@@ -16,7 +16,7 @@ from PIL import Image
 # ═══════════════════════════════════════════════════════════════
 #  HUGGING FACE AUTO-DOWNLOAD
 # ═══════════════════════════════════════════════════════════════
-HF_REPO_ID = "amine/neoscan-models"
+HF_REPO_ID = "bytecraft04/neoscan-models"
 HF_TOKEN   = os.environ.get("HF_TOKEN", "")
 
 HF_FILES = [
