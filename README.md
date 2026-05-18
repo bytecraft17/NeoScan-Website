@@ -6,6 +6,8 @@
 
 **NeoScan AI** is a state-of-the-art diagnostic platform designed for early neonatal screening. Utilizing advanced Deep Learning architectures, the system analyzes images of newborns to detect 15+ medical conditions across four specialized modules, providing immediate risk assessment and clinical advice.
 
+**🌍 Live Website:** [https://bytecraft17.github.io/NeoScan-Website/Frontend/](https://bytecraft17.github.io/NeoScan-Website/Frontend/)
+
 ---
 
 ## 🚀 Key Features
